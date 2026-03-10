@@ -2,6 +2,7 @@ import cv2
 import cv2.aruco as aruco
 import time
 from pid import PID
+import time
 
 
 class Landing_Search_Params:
@@ -15,9 +16,12 @@ class Landing_Search_Params:
 
 
 def find_aruco(tello, aruco_num=13):
-    frame_read = tello.get_frame_read()
-    frame = frame_read.frame
-
+    try:
+        frame_read = tello.get_frame_read()
+        frame = frame_read.frame
+    except Exception as e:
+        print("failed to obtain frame")
+        return(None)
 
     h, w, _ = frame.shape
     frame_center = (w // 2, h // 2)
@@ -59,7 +63,7 @@ def pid_landing(tello,
 
 
     # TODO adjust params
-    descent_speed = 10
+    descent_speed = 20
     landing_threshold = 20  # in pixels
 
     prev_time = time.time()
@@ -69,6 +73,9 @@ def pid_landing(tello,
         aruco_pos_error = find_aruco(tello, aruco_id)
 
         if aruco_pos_error is None:
+            print("Aruco symbol lost trying again in 0.5 s")
+            time.sleep(0.5)
+            aruco_pos_error = find_aruco(tello, aruco_id)
             raise("Aruco symbol lost")
 
         error_x, error_y = aruco_pos_error
@@ -86,11 +93,17 @@ def pid_landing(tello,
         # descent only if roughly centered
         if abs(error_x) < landing_threshold and abs(error_y) < landing_threshold:
             vz = -descent_speed
+            tello.move_down(vz)
         else:
             vz = 0
 
+        vx = min(20, vx)
+        vy = min(20, vy)
 
-        tello.send_rc_control(vy, vx, vz, 0)
+
+        tello.move_forward(vx)
+        tello.move_left(vy)
+
 
 
         print(f"errorX:{error_x} errorY:{error_y}")
@@ -109,24 +122,30 @@ def search4landing_place(tello, lsp):
     current_move = lsp.step_size
 
     while aruco_pos_error is None:
-        frame_read = tello.get_frame_read()
-        frame = frame_read.frame
+        try:
+            frame_read = tello.get_frame_read()
+            frame = frame_read.frame
+        except:
+            print("failed to obtain frame")
+            time.sleep(0.5)
+            continue
 
         if frame is None:
             continue
 
 
-        aruco_pos_error = find_aruco(frame)
+        time.sleep(0.25)
+        aruco_pos_error = find_aruco(tello=tello)
 
 
         if aruco_pos_error is not None:
             print("Safe to land.")
             try:
                 pid_landing(tello)
+                return
             except:
                 print("Aruco lost during landing return to the search")
                 continue
-            return
 
 
         # move to the next position
@@ -147,5 +166,5 @@ def search4landing_place(tello, lsp):
 
 
         # check if inbounds
-        if current_move > lsp.max_size:
+        if current_move > lsp.max_search_size:
             raise("Landing site not found in the desired size — initiate emergency landing")
