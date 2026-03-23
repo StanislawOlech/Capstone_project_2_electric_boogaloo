@@ -15,7 +15,7 @@ class Landing_Search_Params:
         self.clockwise = clockwise
 
 
-def find_aruco(tello, aruco_num=13):
+def find_aruco(tello, aruco_num=13, display=True):
     try:
         frame_read = tello.get_frame_read()
         frame = frame_read.frame
@@ -49,11 +49,38 @@ def find_aruco(tello, aruco_num=13):
 
         offset = (center_x - frame_center[0], center_y - frame_center[1])
 
+        if not display:
+            break
+
+        # Draw marker outline
+        cv2.polylines(frame, [marker_corners.astype(int)], True, (0, 255, 0), 2)
+
+        # Draw marker center
+        cv2.circle(frame, (center_x, center_y), 5, (0, 0, 255), -1)
+
+        # Draw frame center
+        cv2.circle(frame, frame_center, 5, (255, 0, 0), -1)
+
+        # Draw line from center to marker
+        cv2.line(frame, frame_center, (center_x, center_y), (255, 255, 0), 2)
+
+        # Display offset text
+        cv2.putText(frame, f"Offset: {offset}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+        break
+
+    if display:
+        cv2.imshow("Aruco Detection", frame)
+
+        if cv2.waitKey(1) & 0xFF == 27:
+            return None
+
     return offset
 
 def pid_landing(tello,
                 aruco_id=13,
-                k_p=0.1,
+                k_p=0.2,
                 k_i=0.0,
                 k_d=0.0): # TODO adjust params
 
@@ -63,11 +90,16 @@ def pid_landing(tello,
 
     # TODO adjust params
     descent_speed = 20
-    landing_threshold = 20  # in pixels
+    landing_threshold = 40  # in pixels
 
     prev_time = time.time()
 
     while True:
+        # final landing
+        if tello.get_height() < 40:
+            print("Landing")
+            tello.land()
+            break
 
         aruco_pos_error = find_aruco(tello, aruco_id)
 
@@ -95,13 +127,7 @@ def pid_landing(tello,
         else:
             vz = 0
 
-        tello.send_rc_control(vx, vy, vz, 0)
-
-        # final landing
-        if abs(error_x) < 10 and abs(error_y) < 10 and tello.get_height() < 40:
-            print("Landing")
-            tello.land()
-            break
+        tello.send_rc_control(-vy, vx, vz, 0)
 
 
 def search4landing_place(tello, lsp):
@@ -134,6 +160,7 @@ def search4landing_place(tello, lsp):
             except:
                 tello.send_rc_control(0, 0, 0, 0)
                 print("Aruco lost during landing return to the search")
+                aruco_pos_error = None
                 continue
 
 
