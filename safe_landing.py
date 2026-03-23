@@ -21,7 +21,7 @@ def find_aruco(tello, aruco_num=13):
         frame = frame_read.frame
     except Exception as e:
         print("failed to obtain frame")
-        return(None)
+        return None
 
     h, w, _ = frame.shape
     frame_center = (w // 2, h // 2)
@@ -47,14 +47,13 @@ def find_aruco(tello, aruco_num=13):
         center_x = int(marker_corners[:, 0].mean())
         center_y = int(marker_corners[:, 1].mean())
 
-        return (center_x - frame_center[0], center_y - frame_center[1]) # TODO make sure the coordinates are not mismatched
+        offset = (center_x - frame_center[0], center_y - frame_center[1])
 
-    return None
-
+    return offset
 
 def pid_landing(tello,
                 aruco_id=13,
-                k_p=0.25,
+                k_p=0.1,
                 k_i=0.0,
                 k_d=0.0): # TODO adjust params
 
@@ -76,7 +75,7 @@ def pid_landing(tello,
             print("Aruco symbol lost trying again in 0.5 s")
             time.sleep(0.5)
             aruco_pos_error = find_aruco(tello, aruco_id)
-            raise("Aruco symbol lost")
+            raise RuntimeError("Aruco symbol lost")
 
         error_x, error_y = aruco_pos_error
 
@@ -86,31 +85,20 @@ def pid_landing(tello,
         prev_time = now
 
 
-        vx = pid_y.update(error_y, dt) * -1
-        vy = pid_x.update(error_x, dt)
+        vx = pid_x.update(error_x, dt)
+        vy = pid_y.update(error_y, dt)
 
 
         # descent only if roughly centered
         if abs(error_x) < landing_threshold and abs(error_y) < landing_threshold:
             vz = -descent_speed
-            tello.move_down(vz)
         else:
             vz = 0
 
-        vx = min(20, vx)
-        vy = min(20, vy)
-
-
-        tello.move_forward(vx)
-        tello.move_left(vy)
-
-
-
-        print(f"errorX:{error_x} errorY:{error_y}")
-
+        tello.send_rc_control(vx, vy, vz, 0)
 
         # final landing
-        if abs(error_x) < 10 and abs(error_y) < 10 and tello.get_height() < 20:
+        if abs(error_x) < 10 and abs(error_y) < 10 and tello.get_height() < 40:
             print("Landing")
             tello.land()
             break
@@ -144,6 +132,7 @@ def search4landing_place(tello, lsp):
                 pid_landing(tello)
                 return
             except:
+                tello.send_rc_control(0, 0, 0, 0)
                 print("Aruco lost during landing return to the search")
                 continue
 
@@ -167,4 +156,4 @@ def search4landing_place(tello, lsp):
 
         # check if inbounds
         if current_move > lsp.max_search_size:
-            raise("Landing site not found in the desired size — initiate emergency landing")
+            raise RuntimeError("Landing site not found in the desired size — initiate emergency landing")
