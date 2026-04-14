@@ -4,13 +4,12 @@ import numpy as np
 from safe_landing import search4landing_place, Landing_Search_Params
 from simulator import SimulatorAdapter
 
-
 def main():
     landing_search_params = Landing_Search_Params(step_size=20,
                                                   max_search_size=100,
                                                   clockwise=True)
 
-    simulator = True
+    simulator = False
 
     if simulator:
         initial_position = (random.randint(-100, 100), random.randint(-100, 100))
@@ -22,6 +21,8 @@ def main():
 
         tello.streamon()
         tello.set_video_direction(1)
+        tello.set_video_resolution(Tello.RESOLUTION_480P)
+        tello.set_video_fps(Tello.FPS_5)
 
 
     tello.takeoff()

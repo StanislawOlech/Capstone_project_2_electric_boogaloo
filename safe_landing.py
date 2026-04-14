@@ -2,7 +2,6 @@ import cv2
 import cv2.aruco as aruco
 import time
 from pid import PID
-import time
 
 
 class Landing_Search_Params:
@@ -36,6 +35,14 @@ def find_aruco(tello, aruco_num=13, display=True):
 
     corners, ids, _ = detector.detectMarkers(gray)
 
+
+    if display:
+        cv2.imshow("Aruco Detection", frame)
+
+        if cv2.waitKey(1) & 0xFF == 27:
+            return None
+
+
     if ids is None:
         return None
 
@@ -49,32 +56,8 @@ def find_aruco(tello, aruco_num=13, display=True):
 
         offset = (center_x - frame_center[0], center_y - frame_center[1])
 
-        if not display:
-            break
-
-        # Draw marker outline
-        cv2.polylines(frame, [marker_corners.astype(int)], True, (0, 255, 0), 2)
-
-        # Draw marker center
-        cv2.circle(frame, (center_x, center_y), 5, (0, 0, 255), -1)
-
-        # Draw frame center
-        cv2.circle(frame, frame_center, 5, (255, 0, 0), -1)
-
-        # Draw line from center to marker
-        cv2.line(frame, frame_center, (center_x, center_y), (255, 255, 0), 2)
-
-        # Display offset text
-        cv2.putText(frame, f"Offset: {offset}", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-
         break
 
-    if display:
-        cv2.imshow("Aruco Detection", frame)
-
-        if cv2.waitKey(1) & 0xFF == 27:
-            return None
 
     return offset
 
@@ -96,7 +79,7 @@ def pid_landing(tello,
 
     while True:
         # final landing
-        if tello.get_height() < 40:
+        if tello.get_height() < 30:
             print("Landing")
             tello.land()
             break
@@ -111,23 +94,24 @@ def pid_landing(tello,
 
         error_x, error_y = aruco_pos_error
 
+        if (time.time() - prev_time > 0.5):
 
-        now = time.time()
-        dt = now - prev_time
-        prev_time = now
-
-
-        vx = pid_x.update(error_x, dt)
-        vy = pid_y.update(error_y, dt)
+            now = time.time()
+            dt = now - prev_time
+            prev_time = now
 
 
-        # descent only if roughly centered
-        if abs(error_x) < landing_threshold and abs(error_y) < landing_threshold:
-            vz = -descent_speed
-        else:
-            vz = 0
+            vx = pid_x.update(error_x, dt)
+            vy = pid_y.update(error_y, dt)
 
-        tello.send_rc_control(-vy, vx, vz, 0)
+
+            # descent only if roughly centered
+            if abs(error_x) < landing_threshold and abs(error_y) < landing_threshold:
+                vz = descent_speed
+            else:
+                vz = 0
+
+            tello.send_rc_control(-vy, -vx, -vz, 0) # prawo, przód, góra
 
 
 def search4landing_place(tello, lsp):
@@ -136,25 +120,14 @@ def search4landing_place(tello, lsp):
     current_move = lsp.step_size
 
     while aruco_pos_error is None:
-        try:
-            frame_read = tello.get_frame_read()
-            frame = frame_read.frame
-        except:
-            print("failed to obtain frame")
-            time.sleep(0.5)
-            continue
-
-        if frame is None:
-            continue
-
-
-        time.sleep(0.25)
         aruco_pos_error = find_aruco(tello=tello)
 
 
         if aruco_pos_error is not None:
             print("Safe to land.")
             try:
+                pass
+                time.sleep(0.5)
                 pid_landing(tello)
                 return
             except:
