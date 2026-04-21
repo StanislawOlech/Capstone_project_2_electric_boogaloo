@@ -24,6 +24,8 @@ class TelloControlGUI:
         self.marker_vector = [0, 0, 0] # [lr, fb, up_down]
         self.landing_in_progress = False
         self.final_descent_mode = False
+        self.tello_was_flying = False  # Śledzenie zmian stanu lotu
+        self.landing_start_time = time.time()  # Timestamp początek lądowania
 
         # --- Strojenie auto-lądowania ---
         self.auto_kp = 0.18
@@ -94,6 +96,9 @@ class TelloControlGUI:
         try:
             command_func(*args)
             time.sleep(0.3)
+            # Jeśli to była komenda land, ustaw timestamp
+            if command_func == self.tello.land:
+                self.landing_start_time = time.time()
         except Exception as e:
             print(f"Błąd komendy: {e}")
         finally:
@@ -123,8 +128,13 @@ class TelloControlGUI:
             self.safe_command(self.tello.land)
             return
 
-        if button_id == 2 and not self.tello.is_flying: # A
-            self.takeoff_sequence()
+        if button_id == 2:  # A - START/TAKEOFF
+            # Pozwól startowi jeśli dron nie leci lub jeśli upłynęło więcej niż 2 sekundy od lądowania
+            time_since_landing = time.time() - self.landing_start_time
+            if not self.tello.is_flying and (not self.landing_in_progress or time_since_landing > 2.0):
+                self.takeoff_sequence()
+            elif self.tello.is_flying:
+                print("Dron już leci!")
 
         elif button_id == 3: # X
             self.safe_command(self.switch_camera)
@@ -152,6 +162,11 @@ class TelloControlGUI:
                     lr = int(self.joystick.get_axis(0) * self.speed)
                     fb = int(self.joystick.get_axis(1) * self.speed * -1)
                     self.tello.send_rc_control(lr, fb, 0, 0)
+            
+            # Resetuj landing_in_progress gdy dron już nie leci
+            if self.landing_in_progress and not self.tello.is_flying:
+                self.landing_in_progress = False
+                print("Dron wylądował - gotów do startu")
 
         if time.time() % 2 < 0.1:
             try:
@@ -217,9 +232,13 @@ class TelloControlGUI:
                         lr = int(error_x * self.auto_kp)
                         fb = int(error_y * self.auto_kp * -1) # Mnożymy przez -1, bo osie Y w OpenCV są odwrócone
 
-                        # Saturacja (ograniczenie), żeby dron nie "wariował" przy dużym błędzie
-                        lr = max(min(lr, self.auto_max_speed), -self.auto_max_speed)
-                        fb = max(min(fb, self.auto_max_speed), -self.auto_max_speed)
+                        # Limitowanie prędkości wypadkowej (zamiast każdej osi osobno)
+                        # aby uniknąć przyspieszenia po ukosie
+                        speed_magnitude = np.sqrt(lr**2 + fb**2)
+                        if speed_magnitude > self.auto_max_speed and speed_magnitude > 0:
+                            scale = self.auto_max_speed / speed_magnitude
+                            lr = int(lr * scale)
+                            fb = int(fb * scale)
 
                         # Martwa strefa (jeśli błąd jest malutki, ustaw 0, żeby nie drżał)
                         if abs(error_x) < self.auto_deadzone_px:
@@ -239,8 +258,14 @@ class TelloControlGUI:
                             # W final descent: delikatne centrowanie + szybkie schodzenie
                             lr = int(error_x * self.final_descent_kp)
                             fb = int(error_y * self.final_descent_kp * -1)
-                            lr = max(min(lr, 12), -12)
-                            fb = max(min(fb, 12), -12)
+                            
+                            # Limitowanie prędkości wypadkowej
+                            speed_magnitude = np.sqrt(lr**2 + fb**2)
+                            if speed_magnitude > 12 and speed_magnitude > 0:
+                                scale = 12 / speed_magnitude
+                                lr = int(lr * scale)
+                                fb = int(fb * scale)
+                            
                             if abs(error_x) < 25: lr = 0
                             if abs(error_y) < 25: fb = 0
                             down = self.final_descent_down if self.auto_pilot else 0
